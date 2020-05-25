@@ -152,6 +152,11 @@ public class BigQueryMapper<InputT, OutputT>
     // Validate Table Schema
     FieldList tableFields = table.getDefinition().getSchema().getFields();
 
+    LOG.info("tableFields: {}", tableFields.toString());
+    LOG.info("row: {}", row.toString());
+    LOG.info(row);
+    LOG.info("inputSchema: {}", inputSchema.toString());
+
     Set<String> rowKeys = row.keySet();
     Boolean tableWasUpdated = false;
     List<Field> newFieldList = new ArrayList<Field>();
