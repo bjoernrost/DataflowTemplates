@@ -154,13 +154,28 @@ public class BigQueryMapper<InputT, OutputT>
 
     LOG.info("tableFields: {}", tableFields.toString());
     LOG.info("row: {}", row.toString());
-    LOG.info(row);
     LOG.info("inputSchema: {}", inputSchema.toString());
 
     Set<String> rowKeys = row.keySet();
     Boolean tableWasUpdated = false;
     List<Field> newFieldList = new ArrayList<Field>();
     for (String rowKey : rowKeys) {
+     Object item = row.get(rowKey);
+     LOG.info("rowKey: {}", rowKey.toString());
+     LOG.info("value: {}", item.toString());
+
+     Class cls = item.getClass();
+     LOG.info("the type of item is: {}", cls.getName());
+
+         if (item instanceof List)
+    {
+        LOG.info("found an array");
+    }
+    else if (item instanceof Map)
+    {
+        LOG.info("found an object");
+    }
+
       // Check if rowKey (column from data) is in the BQ Table
       try {
         Field tableField = tableFields.get(rowKey);
@@ -245,11 +260,18 @@ public class BigQueryMapper<InputT, OutputT>
       List<Field> newFieldList, Map<String, LegacySQLTypeName> inputSchema) {
     // Call Get Schema and Extract New Field Type
     Field newField;
+    Field.Mode fieldMode = Field.Mode.NULLABLE;
+
+    // Test cell for List type and set field mode
+    if (row.get(rowKey) instanceof List) {
+      LOG.debug("Setting field mode to REPEATED");
+      fieldMode = Field.Mode.REPEATED;
+    } 
 
     if (inputSchema.containsKey(rowKey)) {
       newField = Field.of(rowKey, inputSchema.get(rowKey));
     } else {
-      newField = Field.of(rowKey, LegacySQLTypeName.STRING);
+      newField = Field.newBuilder(rowKey, LegacySQLTypeName.STRING).setMode(fieldMode).build();
     }
 
     newFieldList.add(newField);
