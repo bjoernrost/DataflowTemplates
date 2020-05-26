@@ -30,6 +30,7 @@ import com.google.cloud.bigquery.TableInfo;
 import com.google.cloud.bigquery.TimePartitioning;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -181,6 +182,7 @@ public class BigQueryMapper<InputT, OutputT>
         Field tableField = tableFields.get(rowKey);
       } catch (IllegalArgumentException e) {
         tableWasUpdated = addNewTableField(tableId, row, rowKey, newFieldList, inputSchema);
+        LOG.info("table was update: {}", tableWasUpdated.toString());
       }
     }
 
@@ -256,25 +258,66 @@ public class BigQueryMapper<InputT, OutputT>
     tables.put(tableName, updatedTable);
   }
 
+  private FieldList createNestedFields(LinkedHashMap obj) {
+    List<Field> fl = new ArrayList();
+
+    Set<String> objKeys = obj.keySet();
+
+    for (String objKey : objKeys) {
+     Object item = obj.get(objKey);
+     LOG.info("objKey: {}", objKey.toString());
+     LOG.info("objValue: {}", item.toString());
+
+     Class cls = item.getClass();
+     LOG.info("the type of item is: {}", cls.getName());
+
+         if (item instanceof List)
+    {
+        LOG.info("found an array");
+        //TODO: set field mode
+    }
+    else if (item instanceof Map)
+    {
+        LOG.info("found an object");
+        //TODO: here be recursion
+    }
+
+    fl.add(Field.newBuilder(objKey, LegacySQLTypeName.STRING).build());
+    }
+
+    return FieldList.of(fl);
+  }
+
   private Boolean addNewTableField(TableId tableId, TableRow row, String rowKey,
       List<Field> newFieldList, Map<String, LegacySQLTypeName> inputSchema) {
     // Call Get Schema and Extract New Field Type
     Field newField;
     Field.Mode fieldMode = Field.Mode.NULLABLE;
+    Object cellItem = row.get(rowKey);
 
     // Test cell for List type and set field mode
-    if (row.get(rowKey) instanceof List) {
+    if (cellItem instanceof List) {
       LOG.debug("Setting field mode to REPEATED");
       fieldMode = Field.Mode.REPEATED;
-    } 
+      //TODO: unpack first element so we can check for object on it
+    }
 
-    if (inputSchema.containsKey(rowKey)) {
+    // Test cell for object and construct subFieldList
+    if (cellItem instanceof LinkedHashMap) {
+      LOG.info("We have found an object!");
+      LinkedHashMap lhm = (LinkedHashMap) cellItem;
+      FieldList sfl = createNestedFields(lhm);
+      LOG.info(sfl.toString());
+      newField = Field.newBuilder(rowKey, LegacySQLTypeName.RECORD, sfl).setMode(fieldMode).build();
+    } else if (inputSchema.containsKey(rowKey)) {
       newField = Field.of(rowKey, inputSchema.get(rowKey));
     } else {
       newField = Field.newBuilder(rowKey, LegacySQLTypeName.STRING).setMode(fieldMode).build();
     }
 
+    LOG.info("before newFieldList: {}", newFieldList.toString());
     newFieldList.add(newField);
+    LOG.info("after newFieldList: {}", newFieldList.toString());
 
     // Currently we always add new fields for each call
     // TODO: add an option to ignore new field and why boolean?
