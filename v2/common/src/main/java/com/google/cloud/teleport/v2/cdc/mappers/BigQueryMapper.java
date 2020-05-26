@@ -293,13 +293,23 @@ public class BigQueryMapper<InputT, OutputT>
     // Call Get Schema and Extract New Field Type
     Field newField;
     Field.Mode fieldMode = Field.Mode.NULLABLE;
+    LegacySQLTypeName sqlType = LegacySQLTypeName.STRING;
     Object cellItem = row.get(rowKey);
+
+    // Set data type if a schema is provided
+    if (inputSchema.containsKey(rowKey)) {
+      sqlType = inputSchema.get(rowKey);
+    }
 
     // Test cell for List type and set field mode
     if (cellItem instanceof List) {
       LOG.debug("Setting field mode to REPEATED");
       fieldMode = Field.Mode.REPEATED;
-      //TODO: unpack first element so we can check for object on it
+      //unpack first element so we can check if it is an object
+      List cellList = (List) cellItem;
+      if (!cellList.isEmpty()) {
+        cellItem = cellList.get(0);
+      }
     }
 
     // Test cell for object and construct subFieldList
@@ -309,15 +319,12 @@ public class BigQueryMapper<InputT, OutputT>
       FieldList sfl = createNestedFields(lhm);
       LOG.info(sfl.toString());
       newField = Field.newBuilder(rowKey, LegacySQLTypeName.RECORD, sfl).setMode(fieldMode).build();
-    } else if (inputSchema.containsKey(rowKey)) {
-      newField = Field.of(rowKey, inputSchema.get(rowKey));
     } else {
-      newField = Field.newBuilder(rowKey, LegacySQLTypeName.STRING).setMode(fieldMode).build();
+      newField = Field.newBuilder(rowKey, sqlType).setMode(fieldMode).build();
     }
 
-    LOG.info("before newFieldList: {}", newFieldList.toString());
     newFieldList.add(newField);
-    LOG.info("after newFieldList: {}", newFieldList.toString());
+    LOG.info("newFieldList: {}", newFieldList.toString());
 
     // Currently we always add new fields for each call
     // TODO: add an option to ignore new field and why boolean?
