@@ -153,10 +153,6 @@ public class BigQueryMapper<InputT, OutputT>
     // Validate Table Schema
     FieldList tableFields = table.getDefinition().getSchema().getFields();
 
-    LOG.info("tableFields: {}", tableFields.toString());
-    LOG.info("row: {}", row.toString());
-    LOG.info("inputSchema: {}", inputSchema.toString());
-
     Set<String> rowKeys = row.keySet();
     Boolean tableWasUpdated = false;
     List<Field> newFieldList = new ArrayList<Field>();
@@ -175,6 +171,7 @@ public class BigQueryMapper<InputT, OutputT>
     else if (item instanceof Map)
     {
         LOG.info("found an object");
+        //TODO: we'll need to check if fields within the object have changed!
     }
 
       // Check if rowKey (column from data) is in the BQ Table
@@ -260,32 +257,60 @@ public class BigQueryMapper<InputT, OutputT>
 
   private FieldList createNestedFields(LinkedHashMap obj) {
     List<Field> fl = new ArrayList();
+    Field.Mode fieldMode = Field.Mode.NULLABLE;
+    LegacySQLTypeName sqlType;
 
     Set<String> objKeys = obj.keySet();
 
     for (String objKey : objKeys) {
-     Object item = obj.get(objKey);
+     Object cellItem = obj.get(objKey);
      LOG.info("objKey: {}", objKey.toString());
-     LOG.info("objValue: {}", item.toString());
+     LOG.info("objValue: {}", cellItem.toString());
 
-     Class cls = item.getClass();
-     LOG.info("the type of item is: {}", cls.getName());
+     Class cls = cellItem.getClass();
+     LOG.info("the type of cellItem is: {}", cls.getName());
 
-         if (item instanceof List)
+    if (cellItem instanceof List)
     {
-        LOG.info("found an array");
-        //TODO: set field mode
-    }
-    else if (item instanceof Map)
-    {
-        LOG.info("found an object");
-        //TODO: here be recursion
+      LOG.debug("Setting field mode to REPEATED");
+      fieldMode = Field.Mode.REPEATED;
+      //unpack first element so we can check if it is also an object
+      List cellList = (List) cellItem;
+      if (!cellList.isEmpty()) {
+        cellItem = cellList.get(0);
+      }
     }
 
-    fl.add(Field.newBuilder(objKey, LegacySQLTypeName.STRING).build());
+    sqlType = getSQLType(cellItem);
+
+    if (sqlType.equals(LegacySQLTypeName.RECORD)) {
+      //here be recursion
+      LOG.info("We have found an object within an object!");
+      LinkedHashMap lhm = (LinkedHashMap) cellItem;
+      FieldList sfl = createNestedFields(lhm);
+      LOG.info(sfl.toString());
+      fl.add(Field.newBuilder(objKey, sqlType, sfl).setMode(fieldMode).build());
+    } else {
+    fl.add(Field.newBuilder(objKey, sqlType).build());
     }
+  }
 
     return FieldList.of(fl);
+  }
+
+  private LegacySQLTypeName getSQLType(Object item) {
+    if (item instanceof Integer) {
+      return LegacySQLTypeName.INTEGER;
+    } else if (item instanceof Boolean) {
+      return LegacySQLTypeName.BOOLEAN;
+    } else if (item instanceof Double) {
+      return LegacySQLTypeName.FLOAT;
+    } else if (item instanceof LinkedHashMap) {
+      return LegacySQLTypeName.RECORD;
+    } else {
+      // we could try to parse out a date before defaulting to string
+      return LegacySQLTypeName.STRING;
+    }
   }
 
   private Boolean addNewTableField(TableId tableId, TableRow row, String rowKey,
@@ -299,13 +324,16 @@ public class BigQueryMapper<InputT, OutputT>
     // Set data type if a schema is provided
     if (inputSchema.containsKey(rowKey)) {
       sqlType = inputSchema.get(rowKey);
+    } else {
+        sqlType = getSQLType(cellItem);
     }
+
 
     // Test cell for List type and set field mode
     if (cellItem instanceof List) {
       LOG.debug("Setting field mode to REPEATED");
       fieldMode = Field.Mode.REPEATED;
-      //unpack first element so we can check if it is an object
+      //unpack first element so we can check if it is also an object
       List cellList = (List) cellItem;
       if (!cellList.isEmpty()) {
         cellItem = cellList.get(0);
@@ -313,12 +341,12 @@ public class BigQueryMapper<InputT, OutputT>
     }
 
     // Test cell for object and construct subFieldList
-    if (cellItem instanceof LinkedHashMap) {
+    if (sqlType.equals(LegacySQLTypeName.RECORD)) {
       LOG.info("We have found an object!");
       LinkedHashMap lhm = (LinkedHashMap) cellItem;
       FieldList sfl = createNestedFields(lhm);
       LOG.info(sfl.toString());
-      newField = Field.newBuilder(rowKey, LegacySQLTypeName.RECORD, sfl).setMode(fieldMode).build();
+      newField = Field.newBuilder(rowKey, sqlType, sfl).setMode(fieldMode).build();
     } else {
       newField = Field.newBuilder(rowKey, sqlType).setMode(fieldMode).build();
     }
