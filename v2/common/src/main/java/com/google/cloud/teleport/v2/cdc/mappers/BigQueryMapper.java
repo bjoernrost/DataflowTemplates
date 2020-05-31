@@ -157,29 +157,19 @@ public class BigQueryMapper<InputT, OutputT>
     Boolean tableWasUpdated = false;
     List<Field> newFieldList = new ArrayList<Field>();
     for (String rowKey : rowKeys) {
-     Object item = row.get(rowKey);
-     LOG.info("rowKey: {}", rowKey.toString());
-     LOG.info("value: {}", item.toString());
+      Object item = row.get(rowKey);
 
-     Class cls = item.getClass();
-     LOG.info("the type of item is: {}", cls.getName());
-
-         if (item instanceof List)
-    {
-        LOG.info("found an array");
-    }
-    else if (item instanceof Map)
-    {
+      if (getSQLType(item).equals(LegacySQLTypeName.RECORD)) {
         LOG.info("found an object");
         //TODO: we'll need to check if fields within the object have changed!
-    }
+      }
 
       // Check if rowKey (column from data) is in the BQ Table
       try {
         Field tableField = tableFields.get(rowKey);
       } catch (IllegalArgumentException e) {
         tableWasUpdated = addNewTableField(tableId, row, rowKey, newFieldList, inputSchema);
-        LOG.info("table was update: {}", tableWasUpdated.toString());
+        LOG.info("table was updated: {}", tableWasUpdated.toString());
       }
     }
 
