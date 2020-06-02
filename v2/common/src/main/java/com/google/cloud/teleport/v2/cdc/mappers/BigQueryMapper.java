@@ -157,17 +157,17 @@ public class BigQueryMapper<InputT, OutputT>
     Boolean tableWasUpdated = false;
     List<Field> newFieldList = new ArrayList<Field>();
     for (String rowKey : rowKeys) {
-      Object item = row.get(rowKey);
+//      Object item = row.get(rowKey);
 
-      if (getSQLType(item).equals(LegacySQLTypeName.RECORD)) {
-        LOG.info("found an object");
-        //TODO: we'll need to check if fields within the object have changed!
-      }
-
+      /*
       // Check if rowKey (column from data) is in the BQ Table
       try {
         Field tableField = tableFields.get(rowKey);
       } catch (IllegalArgumentException e) {
+        fieldNeedsUpdate = true;
+      } */
+
+      if (recursiveFieldCheck(rowKey, row.get(rowKey), tableFields)) {
         tableWasUpdated = addNewTableField(tableId, row, rowKey, newFieldList, inputSchema);
         LOG.info("table was updated: {}", tableWasUpdated.toString());
       }
@@ -177,6 +177,35 @@ public class BigQueryMapper<InputT, OutputT>
       LOG.info("Updating Table");
       updateBigQueryTable(tableId, table, tableFields, newFieldList);
     }
+  }
+
+  private Boolean recursiveFieldCheck(String rowKey, Object rowValue, FieldList tableFields) {
+    Boolean updateField = false;
+    try {
+      Field tableField = tableFields.get(rowKey);
+      if (rowValue instanceof List) {
+        //unpack first element so we can check if it is also an object
+        List cellList = (List) rowValue;
+        if (!cellList.isEmpty()) {
+          rowValue = cellList.get(0);
+        }
+      }
+      if (getSQLType(rowValue).equals(LegacySQLTypeName.RECORD)) {
+        LOG.info("recursing field check into object: {}", rowKey);
+        HashMap cellMap = (HashMap) rowValue;
+        Set<String> objKeys = cellMap.keySet();
+        for (String objKey : objKeys) {
+          if (recursiveFieldCheck(objKey, cellMap.get(objKey), tableField.getSubFields())) {
+            LOG.info("found nested field mismatch on {}", objKey);
+            updateField = true;
+          }
+        }
+      }
+    } catch (IllegalArgumentException e) {
+      updateField = true;
+      LOG.info("caught exception on {}", rowKey);
+    }
+    return updateField;
   }
 
   private Table getBigQueryTable(TableId tableId) {
@@ -234,6 +263,13 @@ public class BigQueryMapper<InputT, OutputT>
     LOG.info(tableName);
     LOG.info("Mapping New Columns:");
     for (Field field : newFieldList) {
+      // if we update a nested field, the parent is already in the list
+      // but there can only be one
+      for (Field existingField : tableFields) {
+        if (existingField.getName().equals(field.getName())) {
+          fieldList.remove(existingField);
+        }
+      }
       fieldList.add(field);
       LOG.info(field.toString());
     }
@@ -274,7 +310,6 @@ public class BigQueryMapper<InputT, OutputT>
     sqlType = getSQLType(cellItem);
 
     if (sqlType.equals(LegacySQLTypeName.RECORD)) {
-      //here be recursion
       LOG.info("We have found an object within an object!");
       LinkedHashMap lhm = (LinkedHashMap) cellItem;
       FieldList sfl = createNestedFields(lhm);
@@ -317,7 +352,6 @@ public class BigQueryMapper<InputT, OutputT>
     } else {
         sqlType = getSQLType(cellItem);
     }
-
 
     // Test cell for List type and set field mode
     if (cellItem instanceof List) {
